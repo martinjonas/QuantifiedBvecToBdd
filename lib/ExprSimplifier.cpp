@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "ExprSimplifier.h"
+#include "EGraphs.h"
 #include "Model.h"
 #include "UnconstrainedVariableSimplifier.h"
 #include "simplificationPasses/EqualityPropagator.h"
@@ -97,6 +98,15 @@ expr ExprSimplifier::Simplify(expr expression)
 
     context->check_error();
     clearCaches();
+
+    if (false)
+    {
+        z3::context ctx1;
+        z3::solver s(ctx1);
+        s.from_string(EGraphs::EGraph.Simplify(expression));
+        expression = mk_and(s.assertions());
+    }
+
     return expression;
 }
 
