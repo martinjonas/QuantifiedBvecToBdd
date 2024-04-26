@@ -101,10 +101,7 @@ expr ExprSimplifier::Simplify(expr expression)
 
     if (false)
     {
-        z3::context ctx1;
-        z3::solver s(ctx1);
-        s.from_string(EGraphs::EGraph.Simplify(expression));
-        expression = mk_and(s.assertions());
+	expression = EGraphs::EGraph.Simplify(expression, context);
     }
 
     return expression;
