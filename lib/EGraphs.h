@@ -12,17 +12,17 @@ namespace EGraphs
 {
 	class Function
 	{
-		std::vector<Function*>* UsedBy;
+	public: std::vector<Function*>* UsedBy;
 		Function* Parent;
 		std::vector<Function*>* Inputs;
-		z3::expr* Value;
+		Z3_func_decl Value;
 
-	public: Function(std::vector<Function*>* inputs, z3::expr* value)
+	public: Function(std::vector<Function*>* inputs, z3::expr value)
 	{
 		this->UsedBy = new std::vector<Function*>();
 		this->Parent = this;
 		this->Inputs = inputs;
-		this->Value = value;
+		this->Value = Z3_func_decl(value.decl());
 		for (Function* func : *inputs)
 		{
 			func->UsedBy->push_back(this);
@@ -33,6 +33,8 @@ namespace EGraphs
 		  {
 			  if (this->UsedBy->empty())
 			  {
+std::cout << "destroying ";
+std::cout << this->Value << std::endl;
 				  for (Function* func : *this->Inputs)
 				  {
 					  func->UsedBy->erase(std::remove(func->UsedBy->begin(), func->UsedBy->end(), this), func->UsedBy->end());
@@ -57,14 +59,14 @@ namespace EGraphs
 		  }
 
 	public:
-		z3::expr* GetValue()
+		Z3_func_decl GetValue()
 		{
 			return this->Value;
 		}
 
-		unsigned getName()
+		Z3_func_decl getName() const
 		{
-			return this->Value->decl().id();
+			return this->Value;
 		}
 
 		Function* GetRoot()
@@ -80,17 +82,25 @@ namespace EGraphs
 
 		bool operator==(const Function& other) const
 		{
+std::cout << "comparing started" << std::endl;
+std::cout << this->Value << std::endl;
+std::cout << this->Value << std::endl;
+std::cout << this->Inputs << std::endl;
+std::cout << other.Inputs << std::endl;
 			if (this->Inputs->size() != other.Inputs->size() || this->getName() != other.getName())
 			{
 				return false;
 			}
+std::cout << "comparing" << std::endl;
 			for (size_t i = 0; i < this->Inputs->size(); i++)
 			{
+std::cout << i << std::endl;
 				if (!(*(*(this->Inputs))[i] == *(*(other.Inputs))[i]))
 				{
 					return false;
 				}
 			}
+std::cout << "comparing done" << std::endl;
 			return true;
 		}
 
@@ -125,16 +135,20 @@ namespace EGraphs
 		}
 	};
 
-	bool TryGetRealFunction(Function* function, std::map<unsigned, std::vector<Function*>*> functions, Function** outFunction)
+	bool TryGetRealFunction(Function* function, std::map<Z3_func_decl, std::vector<Function*>*> functions, Function** outFunction)
 	{
+std::cout << "trygetrealfunction" << std::endl;
 		if (functions.find(function->getName()) == functions.end())
 		{
 			return false;
 		}
+std::cout << "trygetrealfunction1" << std::endl;
 		for (Function* realFunction : *functions[function->getName()])
 		{
+std::cout << "trygetrealfunction2" << std::endl;
 			if (*realFunction == *function)
 			{
+std::cout << "trygetrealfunction3" << std::endl;
 				*outFunction = realFunction;
 				return true;
 			}
@@ -145,7 +159,7 @@ namespace EGraphs
 	class EGraph
 	{
 
-		std::map<unsigned, std::vector<Function*>*> _functions;
+		std::map<Z3_func_decl, std::vector<Function*>*> _functions;
 		std::map<Function*, std::vector<Function*>*> _class;
 		std::vector<Function*> _in_equalities;
 		std::set<Function*> _quantified_variables;
@@ -154,7 +168,7 @@ namespace EGraphs
 	public: EGraph(z3::context* ctx)
 		{
 			this->_quantified_variables = std::set<Function*>();
-			this->_functions = std::map<unsigned, std::vector<Function*>*>{};
+			this->_functions = std::map<Z3_func_decl, std::vector<Function*>*>{};
 			this->_in_equalities = std::vector<Function*>();
 			this->_class = std::map<Function*, std::vector<Function*>*>();
 			this->ctx = ctx;
@@ -183,86 +197,104 @@ namespace EGraphs
 			return _class;
 		}
 
-		static EGraph* ExprToEGraph(z3::expr* expr, z3::context* ctx)
+		static EGraph* ExprToEGraph(z3::expr expr, z3::context* ctx)
 		{
 		    EGraph* graph = new EGraph(ctx);
 		    graph->ParseAnd(expr);
-		    
+
 		    return graph;
 		}
 
-		void ParseAnd(z3::expr* expr)
+		void ParseAnd(z3::expr expr)
 		{
-		    for (z3::expr e: expr->args())
+std::cout << "and" << std::endl;
+			int numArgs = expr.num_args();
+			for (int i = 0; i < numArgs; i++)
 		    {
-		        if (e.is_and())
+		        if (expr.arg(i).is_and())
 		        {
-		            this->ParseAnd(&e);
+		            this->ParseAnd(expr.arg(i));
 		            continue;
 		        }
-		        if (e.is_eq())
+		        if (expr.arg(i).is_eq())
 		        {
-		            this->ParseEq(&e);
+		            this->ParseEq(expr.arg(i));
 		            continue;
 		        }
-		        this->ParsePredicate(&e);
+		        this->ParsePredicate(expr.arg(i));
 		    }
 		}
 
-		void ParseEq(z3::expr* expr)
+		void ParseEq(z3::expr expr)
 		{
+std:: cout << "eq" << std::endl;
 			std::vector<Function*> vec = std::vector<Function*>();
-			for (z3::expr arg : expr->args())
+			int numArgs = expr.num_args();
+			for (int i = 0; i < numArgs; i++)
 			{
-				vec.push_back(this->ParseOther(&arg));
+				vec.push_back(this->ParseOther(expr.arg(i)));
 			}
 		    this->AddEquality(vec[0], vec[1], expr);
 		}
 
-		// this shouldn't be used normally as Q3B deals with bitvectors, which shouldn't have predicates applied to them
-		void ParsePredicate(z3::expr* expr)
+		void ParsePredicate(z3::expr expr)
 		{
+std::cout << "predicate ";
+std::cout << expr.decl().name().str() << std::endl;
 			std::vector<Function*>* arguments = new std::vector<Function*>();
-			for (z3::expr arg : expr->args())
+			int numArgs = expr.num_args();
+			for (int i = 0; i < numArgs; i++)
 			{
-				arguments->push_back(ParseOther(&arg));
+				arguments->push_back(ParseOther(expr.arg(i)));
 			}
-			AddPredicate(arguments, expr->decl().id(), expr);
+std::cout << "predicate parsed" << std::endl;
+			AddPredicate(arguments, expr);
 		}
 
-		Function* ParseOther(z3::expr* expr)
+		Function* ParseOther(z3::expr expr)
 		{
-		    if (!expr->is_const())
+std::cout << expr.decl().name().str() << std::endl;
+		    if (!expr.is_const())
 		    {
 				// it's a function with >0 arguments
 				std::vector<Function*>* arguments = new std::vector<Function*>();
-				for (z3::expr arg : expr->args())
+				int numArgs = expr.num_args();
+				for (int i = 0; i < numArgs; i++)
 				{
-					arguments->push_back(ParseOther(&arg));
+					arguments->push_back(ParseOther(expr.arg(i)));
 				}
-                unsigned name = expr->decl().id();
-				return AddFunction(arguments, name, expr);
+std::cout << "app parsed" << std::endl;
+				return AddFunction(arguments, expr);
 		    }
-		    if (expr->to_string() == expr->decl().name().str())
+		    if (expr.to_string() == expr.decl().name().str())
 		    {
 				// it's a quantified variable
-				return AddQuantifiedVariable(expr->decl().id(), expr);
+std::cout << "qv parsed" << std::endl;
+				return AddQuantifiedVariable(expr);
 		    }
 			// it's a number, so not quantified
-			return AddTerm(expr->delc().id(), expr);
+std::cout << "v parsed" << std::endl;
+			return AddTerm(expr);
 		}
 
-		static z3::expr Simplify(z3::expr* expr, z3::context* ctx)
+		static z3::expr Simplify(z3::expr expr, z3::context* ctx)
 		{
-			if (!expr->is_and())
+			if (!expr.is_and())
 			{
-				return *expr;
+                std::cout << "nothing was simplified" << std::endl;
+				return expr;
 			}
+                    std::cout << "meh" << std::endl;
 		    EGraph* graph = ExprToEGraph(expr, ctx);
+                    std::cout << "meh" << std::endl;
 		    auto repr = graph->FindDefs();
+                    std::cout << "meh" << std::endl;
 		    repr = graph->RefineDefs(repr);
+                    std::cout << "meh" << std::endl;
 		    auto core = graph->FindCore(repr);
-            z3::expr res = graph->ToExprString(repr, core);
+                    std::cout << "meh" << std::endl;
+                    z3::expr res = graph->ToExprString(repr, core);
+                    std::cout << "meh" << std::endl;
 
 		    delete graph;
 		    delete repr;
@@ -293,6 +325,7 @@ namespace EGraphs
 					arguments.push_back(term == NodeToTerm(InSameClass, repr));
 				}
 			}
+                    std::cout << "before and" << std::endl;
 			return mk_and(arguments);
 		}
 
@@ -300,14 +333,14 @@ namespace EGraphs
 		{
 			if (node->Inputs->size() == 0)
 			{
-				return *node->GetValue();
+				return z3::func_decl(*this->ctx, node->GetValue())();
 			}
 			z3::expr_vector arguments(*this->ctx);
 			for (Function* arg : *node->Inputs)
 			{
 				arguments.push_back(NodeToTerm((*repr)[arg], repr));
 			}
-			return (node->GetValue()->decl())(arguments);
+			return (z3::func_decl(*this->ctx, node->GetValue()))(arguments);
 		}
 
 		void MakeEqual(Function* first, Function* second)
@@ -324,15 +357,16 @@ namespace EGraphs
 			this->_class.erase(root);
 		}
 
-		Function* AddQuantifiedVariable(unsigned name, z3::expr* value)
+		Function* AddQuantifiedVariable(z3::expr value)
 		{
-			Function* term = AddTerm(name, value);
+			Function* term = AddTerm(value);
 			_quantified_variables.insert(term);
 			return term;
 		}
 
-		Function* AddTerm(unsigned name, z3::expr* value)
+		Function* AddTerm(z3::expr value)
 		{
+			Z3_func_decl name = Z3_func_decl(value.decl());
 			if (this->_functions.find(name) == this->_functions.end())
 			{
 				Function* term = new Function(new std::vector<Function*>{}, value);
@@ -342,8 +376,9 @@ namespace EGraphs
 			return this->_functions[name]->at(0);
 		}
 
-		Function* AddFunction(std::vector<Function*>* inputs, unsigned name, z3::expr* value)
+		Function* AddFunction(std::vector<Function*>* inputs, z3::expr value)
 		{
+			Z3_func_decl name = Z3_func_decl(value.decl());
 			if (this->_functions.find(name) == this->_functions.end())
 			{
 				Function* func = new Function(inputs, value);
@@ -377,7 +412,7 @@ namespace EGraphs
 			}
 		}
 
-		void AddEquality(Function* first, Function* second, z3::expr* value)
+		void AddEquality(Function* first, Function* second, z3::expr value)
 		{
 			Function* realFirst = first;
 			if (TryGetRealFunction(first, this->_functions, &realFirst))
@@ -553,7 +588,7 @@ namespace EGraphs
 			std::map<Function*, bool>* ColoredGraph = new std::map<Function*, bool>();
 
 			// initialize false as the value for every node of EGraph at the start
-			std::map<unsigned, std::vector<Function*>*>::iterator it;
+			std::map<Z3_func_decl, std::vector<Function*>*>::iterator it;
 			for (it = this->_functions.begin(); it != this->_functions.end(); it++)
 			{
 				for (Function* func : *it->second)
@@ -626,16 +661,19 @@ namespace EGraphs
 			return repr;
 		}
 
-		void AddPredicate(std::vector<Function*>* functions, z3::expr* value)
+		void AddPredicate(std::vector<Function*>* functions, z3::expr value)
 		{
+std::cout << "predicate adding started" << std::endl;
 			for (size_t i = 0; i < functions->size(); i++)
 			{
+std::cout << i << std::endl;
 				Function* oldFunction = (*functions)[i];
 				if (TryGetRealFunction(oldFunction, this->_functions, &(*functions)[i]))
 				{
 					// delete
 				}
 			}
+std::cout << "predicate added" << std::endl;
 			Function* newFunc = this->AddFunction(functions, value);
 			this->_in_equalities.push_back(newFunc);
 		}
