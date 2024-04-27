@@ -109,8 +109,6 @@ namespace EGraphs
 		{
 			if (this->UsedBy->empty())
 			{
-std::cout << "destroying ";
-std::cout << this->Value << std::endl;
 				for (Function* func : *this->Inputs)
 				{
 					func->UsedBy->erase(std::remove(func->UsedBy->begin(), func->UsedBy->end(), this), func->UsedBy->end());
@@ -146,11 +144,6 @@ std::cout << this->Value << std::endl;
 
 		bool operator==(const Function& other) const
 		{
-std::cout << "comparing started" << std::endl;
-std::cout << this->Value << std::endl;
-std::cout << this->Value << std::endl;
-std::cout << this->Inputs << std::endl;
-std::cout << other.Inputs << std::endl;
             if (this->IsBoundVar != other.IsBoundVar) return false;
 
 			if (this->IsBoundVar && (this->boundVar != other.boundVar)) return false;
@@ -166,16 +159,13 @@ std::cout << other.Inputs << std::endl;
 			{
 				return false;
 			}
-std::cout << "comparing" << std::endl;
 			for (size_t i = 0; i < this->Inputs->size(); i++)
 			{
-std::cout << i << std::endl;
 				if (!(*(*(this->Inputs))[i] == *(*(other.Inputs))[i]))
 				{
 					return false;
 				}
 			}
-std::cout << "comparing done" << std::endl;
 			return true;
 		}
 
@@ -212,18 +202,14 @@ std::cout << "comparing done" << std::endl;
 
 	bool TryGetRealFunction(Function* function, std::map<Z3_func_decl, std::vector<Function*>*> functions, Function** outFunction)
 	{
-std::cout << "trygetrealfunction" << std::endl;
 		if (functions.find(function->getName()) == functions.end())
 		{
 			return false;
 		}
-std::cout << "trygetrealfunction1" << std::endl;
 		for (Function* realFunction : *functions[function->getName()])
 		{
-std::cout << "trygetrealfunction2" << std::endl;
 			if (*realFunction == *function)
 			{
-std::cout << "trygetrealfunction3" << std::endl;
 				*outFunction = realFunction;
 				return true;
 			}
@@ -282,7 +268,6 @@ std::cout << "trygetrealfunction3" << std::endl;
 
 		void ParseAnd(z3::expr expr)
 		{
-std::cout << "and" << std::endl;
 			int numArgs = expr.num_args();
 			for (int i = 0; i < numArgs; i++)
 		    {
@@ -302,7 +287,6 @@ std::cout << "and" << std::endl;
 
 		void ParseEq(z3::expr expr)
 		{
-std:: cout << "eq" << std::endl;
 			std::vector<Function*> vec = std::vector<Function*>();
 			int numArgs = expr.num_args();
 			for (int i = 0; i < numArgs; i++)
@@ -314,7 +298,6 @@ std:: cout << "eq" << std::endl;
 
 		void ParsePredicate(z3::expr expr)
 		{
-std::cout << "predicate ";
             if (expr.is_app())
             {
 				std::vector<Function*>* arguments = new std::vector<Function*>();
@@ -323,14 +306,12 @@ std::cout << "predicate ";
 				{
 					arguments->push_back(ParseOther(expr.arg(i)));
 				}
-std::cout << "predicate parsed" << std::endl;
 				AddPredicate(arguments, expr);
 				return;
 			}
 			if (expr.is_quantifier())
 			{
 				// do funny stuff
-std::cout << "quantifier" << std::endl;
 				Function* quantifier = ParseOther(expr);
 				_in_equalities.push_back(quantifier);
 				return;
@@ -343,26 +324,17 @@ std::cout << "quantifier" << std::endl;
 		{
 		    if (!expr.is_const() && expr.is_app())
 		    {
-std::cout << expr.decl().name().str() << std::endl;
 				// it's a function with >0 arguments
 				std::vector<Function*>* arguments = new std::vector<Function*>();
-std::cout << "ended here" << std::endl;
 				int numArgs = expr.num_args();
-std::cout << numArgs << std::endl;
 				for (int i = 0; i < numArgs; i++)
 				{
-std::cout << expr.arg(i).to_string() << std::endl;
-std::cout << expr.arg(i).is_var() << std::endl;
-std::cout << expr.arg(i).is_app() << std::endl;
 					arguments->push_back(ParseOther(expr.arg(i)));
-std::cout << i << std::endl;
 				}
-std::cout << "app parsed" << std::endl;
 				return AddFunction(arguments, expr);
 		    }
 			if (expr.is_quantifier())
 			{
-std::cout << "parsing quantifier" << std::endl;
 				Z3_ast ast = (Z3_ast)expr;
 				QuantifierArgs* quantifierArgs = new QuantifierArgs(ast, this->ctx);
 				return AddQuantifier(quantifierArgs, ParseOther(expr.body()));
@@ -374,11 +346,9 @@ std::cout << "parsing quantifier" << std::endl;
 		    if (expr.to_string() == expr.decl().name().str())
 		    {
 				// it's a quantified variable
-std::cout << "qv parsed" << std::endl;
 				return AddQuantifiedVariable(expr);
 		    }
 			// it's a number, so not quantified
-std::cout << "v parsed" << std::endl;
 			return AddTerm(expr);
 		}
 
@@ -386,20 +356,13 @@ std::cout << "v parsed" << std::endl;
 		{
 			if (!expr.is_and())
 			{
-std::cout << "nothing was simplified" << std::endl;
 				return expr;
 			}
-std::cout << "meh" << std::endl;
 		    EGraph* graph = ExprToEGraph(expr, ctx);
-std::cout << "meh" << std::endl;
 		    auto repr = graph->FindDefs();
-std::cout << "meh" << std::endl;
 		    repr = graph->RefineDefs(repr);
-std::cout << "meh" << std::endl;
 		    auto core = graph->FindCore(repr);
-std::cout << "meh" << std::endl;
             z3::expr res = graph->ToExprString(repr, core);
-std::cout << "meh" << std::endl;
 
 		    delete graph;
 		    delete repr;
@@ -430,7 +393,6 @@ std::cout << "meh" << std::endl;
 					arguments.push_back(term == NodeToTerm(InSameClass, repr));
 				}
 			}
-                    std::cout << "before and" << std::endl;
 			return mk_and(arguments);
 		}
 
@@ -593,16 +555,9 @@ std::cout << "meh" << std::endl;
 					second->ManualDestroy();
 				}
 			}
-			std::vector<Function*>* equality = new std::vector<Function*>{ realFirst, realSecond };
-			Function* eq = this->AddFunction(equality, value);
-			this->_in_equalities.push_back(eq);
 
 			MakeEqual(realFirst, realSecond);
 			for (Function* func : *realFirst->UsedBy)
-			{
-				CheckEqualities(func);
-			}
-			for (Function* func : *realSecond->UsedBy)
 			{
 				CheckEqualities(func);
 			}
@@ -825,17 +780,14 @@ std::cout << "meh" << std::endl;
 
 		void AddPredicate(std::vector<Function*>* functions, z3::expr value)
 		{
-std::cout << "predicate adding started" << std::endl;
 			for (size_t i = 0; i < functions->size(); i++)
 			{
-std::cout << i << std::endl;
 				Function* oldFunction = (*functions)[i];
 				if (TryGetRealFunction(oldFunction, this->_functions, &(*functions)[i]))
 				{
 					// delete
 				}
 			}
-std::cout << "predicate added" << std::endl;
 			Function* newFunc = this->AddFunction(functions, value);
 			this->_in_equalities.push_back(newFunc);
 		}
