@@ -10,53 +10,117 @@
 
 namespace EGraphs
 {
+	class QuantifierArgs  {
+	public:
+		bool is_forall;
+		unsigned weight;
+		unsigned num_patterns;
+		unsigned num_decls;
+		Z3_sort *sorts;
+		Z3_symbol *decl_names;
+		Z3_pattern *patterns;
+
+		QuantifierArgs(Z3_ast ast, z3::context* ctx)
+		{
+			unsigned numBound = Z3_get_quantifier_num_bound(*ctx, ast);
+
+			Z3_sort* sorts = (Z3_sort*)malloc(sizeof(Z3_sort) * numBound);
+			Z3_symbol* decl_names = (Z3_symbol*)malloc(sizeof(Z3_symbol) * numBound);
+			for (unsigned i = 0; i < numBound; i++)
+			{
+				sorts[i] = Z3_get_quantifier_bound_sort(*ctx, ast, i);
+				decl_names[i] = Z3_get_quantifier_bound_name(*ctx, ast, i);
+			}
+
+			unsigned numPatterns = Z3_get_quantifier_num_patterns(*ctx, ast);
+			Z3_pattern* patterns = (Z3_pattern*)malloc(sizeof(Z3_pattern) * numPatterns);
+			for (unsigned i = 0; i < numPatterns; i++)
+			{
+				patterns[i] = Z3_get_quantifier_pattern_ast(*ctx, ast, i);
+			}
+
+
+			this->is_forall = Z3_is_quantifier_forall(*ctx, ast);
+			this->weight = Z3_get_quantifier_weight(*ctx, ast);
+			this->num_patterns = numPatterns;
+			this->num_decls = numBound;
+			this->sorts = sorts;
+			this->decl_names = decl_names;
+			this->patterns = patterns;
+		}
+
+		~QuantifierArgs()
+		{
+			free(this->sorts);
+			free(this->decl_names);
+			free(this->patterns);
+		}
+	};
+
 	class Function
 	{
 	public: std::vector<Function*>* UsedBy;
 		Function* Parent;
 		std::vector<Function*>* Inputs;
 		Z3_func_decl Value;
+		bool IsQuantifier;
+		QuantifierArgs* quantifierArgs;
+		bool IsBoundVar;
+		Z3_ast boundVar;
 
 	public: Function(std::vector<Function*>* inputs, z3::expr value)
-	{
-		this->UsedBy = new std::vector<Function*>();
-		this->Parent = this;
-		this->Inputs = inputs;
-		this->Value = Z3_func_decl(value.decl());
-		for (Function* func : *inputs)
 		{
-			func->UsedBy->push_back(this);
+		    this->IsQuantifier = false;
+			this->IsBoundVar = false;
+			this->UsedBy = new std::vector<Function*>();
+			this->Parent = this;
+			this->Inputs = inputs;
+			this->Value = Z3_func_decl(value.decl());
+			for (Function* func : *inputs)
+			{
+				func->UsedBy->push_back(this);
+			}
 		}
-	}
 
-		  void ManualDestroy()
-		  {
-			  if (this->UsedBy->empty())
-			  {
+		Function(QuantifierArgs* args, Function* body)
+		{
+			this->IsQuantifier = true;
+			this->IsBoundVar = false;
+			this->UsedBy = new std::vector<Function*>();
+			this->Parent = this;
+			this->Inputs = new std::vector<Function*>{ body };
+			this->Value = (Z3_func_decl)0;
+			this->quantifierArgs = args;
+			body->UsedBy->push_back(this);
+		}
+
+		Function(Z3_ast boundVar)
+		{
+			this->IsBoundVar = true;
+			this->IsQuantifier = false;
+			this->UsedBy = new std::vector<Function*>();
+			this->Parent = this;
+			this->Inputs = new std::vector<Function*>();
+			this->Value = (Z3_func_decl)0;
+			this->boundVar = boundVar;
+		}
+
+		void ManualDestroy()
+		{
+			if (this->UsedBy->empty())
+			{
 std::cout << "destroying ";
 std::cout << this->Value << std::endl;
-				  for (Function* func : *this->Inputs)
-				  {
-					  func->UsedBy->erase(std::remove(func->UsedBy->begin(), func->UsedBy->end(), this), func->UsedBy->end());
-				  }
-				  delete this->UsedBy;
-				  delete this->Inputs;
-				  delete this;
-			  }
-		  }
-
-		  ~Function()
-		  {
-			  /*if (this->UsedBy->empty())
-			  {
-				  for (Function* func : *this->Inputs)
-				  {
-					  func->Inputs->erase(std::remove(func->Inputs->begin(), func->Inputs->end(), this), func->Inputs->end());
-				  }
-				  delete this->UsedBy;
-				  delete this->Inputs;
-			  }*/
-		  }
+				for (Function* func : *this->Inputs)
+				{
+					func->UsedBy->erase(std::remove(func->UsedBy->begin(), func->UsedBy->end(), this), func->UsedBy->end());
+				}
+				delete this->UsedBy;
+				delete this->Inputs;
+				if (IsQuantifier) delete this->quantifierArgs;
+				delete this;
+			}
+		}
 
 	public:
 		Z3_func_decl GetValue()
@@ -87,6 +151,17 @@ std::cout << this->Value << std::endl;
 std::cout << this->Value << std::endl;
 std::cout << this->Inputs << std::endl;
 std::cout << other.Inputs << std::endl;
+            if (this->IsBoundVar != other.IsBoundVar) return false;
+
+			if (this->IsBoundVar && (this->boundVar != other.boundVar)) return false;
+
+            if (this->IsQuantifier != other.IsQuantifier) return false;
+
+			if (this->IsQuantifier && (this->quantifierArgs->is_forall != other.quantifierArgs->is_forall ||
+				                       this->quantifierArgs->weight != other.quantifierArgs->weight ||
+				                       this->quantifierArgs->num_patterns != other.quantifierArgs->num_patterns ||
+				                       this->quantifierArgs->num_decls != other.quantifierArgs->num_decls)) return false;
+
 			if (this->Inputs->size() != other.Inputs->size() || this->getName() != other.getName())
 			{
 				return false;
@@ -240,32 +315,62 @@ std:: cout << "eq" << std::endl;
 		void ParsePredicate(z3::expr expr)
 		{
 std::cout << "predicate ";
-std::cout << expr.decl().name().str() << std::endl;
-			std::vector<Function*>* arguments = new std::vector<Function*>();
-			int numArgs = expr.num_args();
-			for (int i = 0; i < numArgs; i++)
-			{
-				arguments->push_back(ParseOther(expr.arg(i)));
-			}
-std::cout << "predicate parsed" << std::endl;
-			AddPredicate(arguments, expr);
-		}
-
-		Function* ParseOther(z3::expr expr)
-		{
-std::cout << expr.decl().name().str() << std::endl;
-		    if (!expr.is_const())
-		    {
-				// it's a function with >0 arguments
+            if (expr.is_app())
+            {
 				std::vector<Function*>* arguments = new std::vector<Function*>();
 				int numArgs = expr.num_args();
 				for (int i = 0; i < numArgs; i++)
 				{
 					arguments->push_back(ParseOther(expr.arg(i)));
 				}
+std::cout << "predicate parsed" << std::endl;
+				AddPredicate(arguments, expr);
+				return;
+			}
+			if (expr.is_quantifier())
+			{
+				// do funny stuff
+std::cout << "quantifier" << std::endl;
+				Function* quantifier = ParseOther(expr);
+				_in_equalities.push_back(quantifier);
+				return;
+			}
+			// something very unholy is going on
+			return;
+		}
+
+		Function* ParseOther(z3::expr expr)
+		{
+		    if (!expr.is_const() && expr.is_app())
+		    {
+std::cout << expr.decl().name().str() << std::endl;
+				// it's a function with >0 arguments
+				std::vector<Function*>* arguments = new std::vector<Function*>();
+std::cout << "ended here" << std::endl;
+				int numArgs = expr.num_args();
+std::cout << numArgs << std::endl;
+				for (int i = 0; i < numArgs; i++)
+				{
+std::cout << expr.arg(i).to_string() << std::endl;
+std::cout << expr.arg(i).is_var() << std::endl;
+std::cout << expr.arg(i).is_app() << std::endl;
+					arguments->push_back(ParseOther(expr.arg(i)));
+std::cout << i << std::endl;
+				}
 std::cout << "app parsed" << std::endl;
 				return AddFunction(arguments, expr);
 		    }
+			if (expr.is_quantifier())
+			{
+std::cout << "parsing quantifier" << std::endl;
+				Z3_ast ast = (Z3_ast)expr;
+				QuantifierArgs* quantifierArgs = new QuantifierArgs(ast, this->ctx);
+				return AddQuantifier(quantifierArgs, ParseOther(expr.body()));
+			}
+			if (expr.is_var() && !expr.is_app())
+			{
+				return AddBoundVar(expr);
+			}
 		    if (expr.to_string() == expr.decl().name().str())
 		    {
 				// it's a quantified variable
@@ -281,20 +386,20 @@ std::cout << "v parsed" << std::endl;
 		{
 			if (!expr.is_and())
 			{
-                std::cout << "nothing was simplified" << std::endl;
+std::cout << "nothing was simplified" << std::endl;
 				return expr;
 			}
-                    std::cout << "meh" << std::endl;
+std::cout << "meh" << std::endl;
 		    EGraph* graph = ExprToEGraph(expr, ctx);
-                    std::cout << "meh" << std::endl;
+std::cout << "meh" << std::endl;
 		    auto repr = graph->FindDefs();
-                    std::cout << "meh" << std::endl;
+std::cout << "meh" << std::endl;
 		    repr = graph->RefineDefs(repr);
-                    std::cout << "meh" << std::endl;
+std::cout << "meh" << std::endl;
 		    auto core = graph->FindCore(repr);
-                    std::cout << "meh" << std::endl;
-                    z3::expr res = graph->ToExprString(repr, core);
-                    std::cout << "meh" << std::endl;
+std::cout << "meh" << std::endl;
+            z3::expr res = graph->ToExprString(repr, core);
+std::cout << "meh" << std::endl;
 
 		    delete graph;
 		    delete repr;
@@ -331,6 +436,15 @@ std::cout << "v parsed" << std::endl;
 
 		z3::expr NodeToTerm(Function* node, std::map<Function*, Function*>* repr)
 		{
+			if (node->IsBoundVar) return z3::expr(*this->ctx, node->boundVar);
+			if (node->IsQuantifier)
+			{
+				QuantifierArgs* quantifierArgs = node->quantifierArgs;
+				Z3_ast ast = Z3_mk_quantifier(*this->ctx, quantifierArgs->is_forall, quantifierArgs->weight, 
+					                          quantifierArgs->num_patterns, quantifierArgs->patterns, quantifierArgs->num_decls, 
+					                          quantifierArgs->sorts, quantifierArgs->decl_names, NodeToTerm((*node->Inputs)[0], repr));
+				return z3::expr(*this->ctx, ast);
+			}
 			if (node->Inputs->size() == 0)
 			{
 				return z3::func_decl(*this->ctx, node->GetValue())();
@@ -374,6 +488,54 @@ std::cout << "v parsed" << std::endl;
 				this->_class[this->_functions[name]->at(0)] = new std::vector<Function*>{ term };
 			}
 			return this->_functions[name]->at(0);
+		}
+
+		Function* AddQuantifier(QuantifierArgs* args, Function* body)
+		{
+			Z3_func_decl name = (Z3_func_decl)0;
+			if (this->_functions.find(name) == this->_functions.end())
+			{
+				Function* func = new Function(args, body);
+				this->_functions[name] = new std::vector<Function*>{ func }; // if function didn't exist, make it
+				this->_class[this->_functions[name]->at(0)] = new std::vector<Function*>{ func };
+				return this->_functions[name]->at(0);
+			}
+			Function* temporary = new Function(args, body);
+			for (Function* func : *this->_functions[name])
+			{
+				if (*temporary == *func)
+				{
+					temporary->ManualDestroy();
+					return func;
+				}
+			}
+			this->_functions[name]->push_back(temporary);
+			this->_class[this->_functions[name]->back()] = new std::vector<Function*>{ temporary };
+			return temporary;
+		}
+
+		Function* AddBoundVar(z3::expr expr)
+		{
+			Z3_func_decl name = (Z3_func_decl)0;
+			if (this->_functions.find(name) == this->_functions.end())
+			{
+				Function* func = new Function((Z3_ast)expr);
+				this->_functions[name] = new std::vector<Function*>{ func }; // if function didn't exist, make it
+				this->_class[this->_functions[name]->at(0)] = new std::vector<Function*>{ func };
+				return this->_functions[name]->at(0);
+			}
+			Function* temporary = new Function((Z3_ast)expr);
+			for (Function* func : *this->_functions[name])
+			{
+				if (*temporary == *func)
+				{
+					temporary->ManualDestroy();
+					return func;
+				}
+			}
+			this->_functions[name]->push_back(temporary);
+			this->_class[this->_functions[name]->back()] = new std::vector<Function*>{ temporary };
+			return temporary;
 		}
 
 		Function* AddFunction(std::vector<Function*>* inputs, z3::expr value)
