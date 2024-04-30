@@ -379,10 +379,6 @@ namespace EGraphs
 			}
 			for (auto elem : *repr)
 			{
-				if (elem.first != elem.second)
-				{
-					continue;
-				}
 				z3::expr term = NodeToTerm(elem.second, repr);
 				for (Function* InSameClass : *_class[elem.second->GetRoot()])
 				{
@@ -568,10 +564,6 @@ namespace EGraphs
 			std::set<Function*>* core = new std::set<Function*>();
 			for (auto elem : *repr)
 			{
-				if (elem.first != elem.second)
-				{
-					continue;
-				}
 				core->insert(elem.second);
 				for (Function* func : *_class[elem.second->GetRoot()])
 				{
