@@ -311,12 +311,11 @@ namespace EGraphs
 			}
 			if (expr.is_quantifier())
 			{
-				// do funny stuff
 				Function* quantifier = ParseOther(expr);
 				_in_equalities.push_back(quantifier);
 				return;
 			}
-			// something very unholy is going on
+			// this shouldn't happen
 			return;
 		}
 
