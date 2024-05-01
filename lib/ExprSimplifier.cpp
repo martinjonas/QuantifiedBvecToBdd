@@ -95,14 +95,14 @@ expr ExprSimplifier::Simplify(expr expression)
 	std::cout << std::endl << std::endl << "nnf:" << std::endl;
 	std::cout << expression << std::endl;
     }
-
-    context->check_error();
-    clearCaches();
-
+	
     if (false)
     {
 	expression = EGraphs::EGraph.Simplify(expression, context);
     }
+	
+    context->check_error();
+    clearCaches();
 
     return expression;
 }
