@@ -121,11 +121,6 @@ namespace EGraphs
 		}
 
 	public:
-		Z3_func_decl GetValue()
-		{
-			return this->Value;
-		}
-
 		Z3_func_decl getName() const
 		{
 			return this->Value;
@@ -189,6 +184,10 @@ namespace EGraphs
 			{
 				return false;
 			}
+			if (this->Inputs->size() != other->Inputs->size())
+			{
+				return false;
+			}
 			for (size_t i = 0; i < this->Inputs->size(); i++)
 			{
 				if ((*this->Inputs)[i]->GetRoot() != (*other->Inputs)[i]->GetRoot())
@@ -226,7 +225,7 @@ namespace EGraphs
 		std::set<Function*> _quantified_variables;
 		z3::context* ctx;
 
-	public: EGraph(z3::context* ctx)
+	    EGraph(z3::context* ctx)
 		{
 			this->_quantified_variables = std::set<Function*>();
 			this->_functions = std::map<Z3_func_decl, std::vector<Function*>*>{};
@@ -253,11 +252,7 @@ namespace EGraphs
 			}
 		}
 
-		std::map<Function*, std::vector<Function*>*> GetClasses()
-		{
-			return _class;
-		}
-
+		// functions for parsing z3::expr
 		static EGraph* ExprToEGraph(z3::expr expr, z3::context* ctx)
 		{
 		    EGraph* graph = new EGraph(ctx);
@@ -315,7 +310,7 @@ namespace EGraphs
 				_in_equalities.push_back(quantifier);
 				return;
 			}
-			// this shouldn't happen
+			// to the best of my knowledge, this shouldn't happen
 			return;
 		}
 
@@ -344,32 +339,14 @@ namespace EGraphs
 			}
 		    if (expr.to_string() == expr.decl().name().str())
 		    {
-				// it's a quantified variable
 				return AddQuantifiedVariable(expr);
 		    }
 			// it's a number, so not quantified
 			return AddTerm(expr);
 		}
 
-		static z3::expr Simplify(z3::expr expr, z3::context* ctx)
-		{
-			if (!expr.is_and())
-			{
-				return expr;
-			}
-		    EGraph* graph = ExprToEGraph(expr, ctx);
-		    auto repr = graph->FindDefs();
-		    repr = graph->RefineDefs(repr);
-		    auto core = graph->FindCore(repr);
-            z3::expr res = graph->ToExprString(repr, core);
-
-		    delete graph;
-		    delete repr;
-		    delete core;
-		    return res;
-		}
-
-		z3::expr ToExprString(std::map<Function*, Function*>* repr, std::set<Function*>* core)
+		// functions for building z3::expr
+		z3::expr ToFormula(std::map<Function*, Function*>* repr, std::set<Function*>* core)
 		{
 			z3::expr_vector arguments(*this->ctx);
 			for (Function* in_equality : _in_equalities)
@@ -404,30 +381,17 @@ namespace EGraphs
 			}
 			if (node->Inputs->size() == 0)
 			{
-				return z3::func_decl(*this->ctx, node->GetValue())();
+				return z3::func_decl(*this->ctx, node->getName())();
 			}
 			z3::expr_vector arguments(*this->ctx);
 			for (Function* arg : *node->Inputs)
 			{
 				arguments.push_back(NodeToTerm((*repr)[arg], repr));
 			}
-			return (z3::func_decl(*this->ctx, node->GetValue()))(arguments);
+			return (z3::func_decl(*this->ctx, node->getName()))(arguments);
 		}
 
-		void MakeEqual(Function* first, Function* second)
-		{
-			if (first->GetRoot() == second->GetRoot())
-			{
-				return;
-			}
-			Function* root = second->GetRoot();
-			root->Parent = first->GetRoot();
-			// concat
-			this->_class[first->GetRoot()]->insert(this->_class[first->GetRoot()]->end(), this->_class[root]->begin(), this->_class[root]->end());
-			delete this->_class[root];
-			this->_class.erase(root);
-		}
-
+		// add components
 		Function* AddQuantifiedVariable(z3::expr value)
 		{
 			Function* term = AddTerm(value);
@@ -495,40 +459,18 @@ namespace EGraphs
 			return temporary;
 		}
 
-		Function* AddFunction(std::vector<Function*>* inputs, z3::expr value)
+		void AddPredicate(std::vector<Function*>* functions, z3::expr value)
 		{
-			Z3_func_decl name = Z3_func_decl(value.decl());
-			if (this->_functions.find(name) == this->_functions.end())
+			for (size_t i = 0; i < functions->size(); i++)
 			{
-				Function* func = new Function(inputs, value);
-				this->_functions[name] = new std::vector<Function*>{ func }; // if function didn't exist, make it
-				this->_class[this->_functions[name]->at(0)] = new std::vector<Function*>{ func };
-				return this->_functions[name]->at(0);
-			}
-			Function* temporary = new Function(inputs, value);
-			for (Function* func : *this->_functions[name])
-			{
-				if (*temporary == *func)
+				Function* oldFunction = (*functions)[i];
+				if (TryGetRealFunction(oldFunction, this->_functions, &(*functions)[i]))
 				{
-					temporary->ManualDestroy();
-					return func;
+					// delete
 				}
 			}
-			this->_functions[name]->push_back(temporary);
-			this->_class[this->_functions[name]->back()] = new std::vector<Function*>{ temporary };
-			CheckEqualities(temporary);
-			return temporary;
-		}
-
-		void CheckEqualities(Function* func)
-		{
-			for (size_t i = 0; i < this->_functions[func->getName()]->size() - 1; i++)
-			{
-				if (func->IsEquivalent((*this->_functions[func->getName()])[i]))
-				{
-					MakeEqual(func, (*this->_functions[func->getName()])[i]);
-				}
-			}
+			Function* newFunc = this->AddFunction(functions, value);
+			this->_in_equalities.push_back(newFunc);
 		}
 
 		void AddEquality(Function* first, Function* second, z3::expr value)
@@ -558,6 +500,59 @@ namespace EGraphs
 			}
 		}
 
+		Function* AddFunction(std::vector<Function*>* inputs, z3::expr value)
+		{
+			Z3_func_decl name = Z3_func_decl(value.decl());
+			if (this->_functions.find(name) == this->_functions.end())
+			{
+				Function* func = new Function(inputs, value);
+				this->_functions[name] = new std::vector<Function*>{ func }; // if function didn't exist, make it
+				this->_class[this->_functions[name]->at(0)] = new std::vector<Function*>{ func };
+				return this->_functions[name]->at(0);
+			}
+
+			Function* temporary = new Function(inputs, value);
+			for (Function* func : *this->_functions[name])
+			{
+				if (*temporary == *func)
+				{
+					temporary->ManualDestroy();
+					return func;
+				}
+			}
+			this->_functions[name]->push_back(temporary);
+			this->_class[this->_functions[name]->back()] = new std::vector<Function*>{ temporary };
+			CheckEqualities(temporary);
+			return temporary;
+		}
+
+		// functions for equalities
+		void MakeEqual(Function* first, Function* second)
+		{
+			if (first->GetRoot() == second->GetRoot())
+			{
+				return;
+			}
+			Function* root = second->GetRoot();
+			root->Parent = first->GetRoot();
+			// concat
+			this->_class[first->GetRoot()]->insert(this->_class[first->GetRoot()]->end(), this->_class[root]->begin(), this->_class[root]->end());
+			delete this->_class[root];
+			this->_class.erase(root);
+		}
+
+		void CheckEqualities(Function* func)
+		{
+			for (size_t i = 0; i < this->_functions[func->getName()]->size() - 1; i++)
+			{
+				if (func->IsEquivalent((*this->_functions[func->getName()])[i]))
+				{
+					MakeEqual(func, (*this->_functions[func->getName()])[i]);
+				}
+			}
+		}
+
+		// QEL functions
 		std::set<Function*>* FindCore(std::map<Function*, Function*>* repr)
 		{
 			std::set<Function*>* core = new std::set<Function*>();
@@ -571,17 +566,17 @@ namespace EGraphs
 						continue;
 					}
 
-					bool equivalentFound = false;
+					bool congruentFound = false;
 					for (Function* InCore : *core)
 					{
 						if (InCore->IsCongruent(func))
 						{
-							equivalentFound = true;
+							congruentFound = true;
 							break;
 						}
 					}
 
-					if (!equivalentFound)
+					if (!congruentFound)
 					{
 						core->insert(func);
 					}
@@ -769,18 +764,23 @@ namespace EGraphs
 			return repr;
 		}
 
-		void AddPredicate(std::vector<Function*>* functions, z3::expr value)
+	public: 
+		static z3::expr Simplify(z3::expr expr, z3::context* ctx)
 		{
-			for (size_t i = 0; i < functions->size(); i++)
+			if (!expr.is_and())
 			{
-				Function* oldFunction = (*functions)[i];
-				if (TryGetRealFunction(oldFunction, this->_functions, &(*functions)[i]))
-				{
-					// delete
-				}
+				return expr;
 			}
-			Function* newFunc = this->AddFunction(functions, value);
-			this->_in_equalities.push_back(newFunc);
+			EGraph* graph = ExprToEGraph(expr, ctx);
+			auto repr = graph->FindDefs();
+			repr = graph->RefineDefs(repr);
+			auto core = graph->FindCore(repr);
+			z3::expr res = graph->ToFormula(repr, core);
+
+			delete graph;
+			delete repr;
+			delete core;
+			return res;
 		}
 	};
 }
