@@ -10,6 +10,7 @@
 
 namespace EGraphs
 {
+	// This is a sort of DataContract, it only stores data
 	class QuantifierArgs  {
 	public:
 		bool is_forall;
@@ -137,6 +138,7 @@ namespace EGraphs
 			return root;
 		}
 
+		// tests complete equality, as in exact same node
 		bool operator==(const Function& other) const
 		{
             if (this->IsBoundVar != other.IsBoundVar) return false;
@@ -199,6 +201,7 @@ namespace EGraphs
 		}
 	};
 
+	// used to not create multiple nodes for the same term/formula
 	bool TryGetRealFunction(Function* function, std::map<Z3_func_decl, std::vector<Function*>*> functions, Function** outFunction)
 	{
 		if (functions.find(function->getName()) == functions.end())
@@ -252,7 +255,7 @@ namespace EGraphs
 			}
 		}
 
-		// functions for parsing z3::expr
+		// functions for parsing/transforming z3::expr to EGraph
 		static EGraph* ExprToEGraph(z3::expr expr, z3::context* ctx)
 		{
 		    EGraph* graph = new EGraph(ctx);
@@ -314,6 +317,7 @@ namespace EGraphs
 			return;
 		}
 
+		// this is eventually called by the above functions and it returns the created node for this reason
 		Function* ParseOther(z3::expr expr)
 		{
 		    if (!expr.is_const() && expr.is_app())
@@ -337,6 +341,7 @@ namespace EGraphs
 			{
 				return AddBoundVar(expr);
 			}
+			// .to_string() gives exact number in case of number, otherwise it gives the declaration, but declaration for number is always "bv"
 		    if (expr.to_string() == expr.decl().name().str())
 		    {
 				return AddQuantifiedVariable(expr);
@@ -466,7 +471,8 @@ namespace EGraphs
 				Function* oldFunction = (*functions)[i];
 				if (TryGetRealFunction(oldFunction, this->_functions, &(*functions)[i]))
 				{
-					// delete
+					// at some point this used to cause an error and I don't know why, but not calling it doesn't seem to have much of an impact
+					// oldFunction->ManualDestroy();
 				}
 			}
 			Function* newFunc = this->AddFunction(functions, value);
@@ -535,10 +541,20 @@ namespace EGraphs
 			}
 			Function* root = second->GetRoot();
 			root->Parent = first->GetRoot();
+			// the recursive searching turned out to be a very expensive operation and leaving it out increases the speed of the tests by around 6%
+			// to leave it out, comment out lines 546 and 551-557
+			int size = this->_class[first->GetRoot()]->size();
 			// concat
 			this->_class[first->GetRoot()]->insert(this->_class[first->GetRoot()]->end(), this->_class[root]->begin(), this->_class[root]->end());
 			delete this->_class[root];
 			this->_class.erase(root);
+			for (int i = 0; i < size; i++)
+			{
+				for (Function* func : *(*this->_class[first->GetRoot()])[0]->UsedBy)
+				{
+					CheckEqualities(func);
+				}
+			}
 		}
 
 		void CheckEqualities(Function* func)
@@ -558,6 +574,7 @@ namespace EGraphs
 			std::set<Function*>* core = new std::set<Function*>();
 			for (auto elem : *repr)
 			{
+				// every representative is in core
 				core->insert(elem.second);
 				for (Function* func : *_class[elem.second->GetRoot()])
 				{
@@ -575,7 +592,7 @@ namespace EGraphs
 							break;
 						}
 					}
-
+					// if there is no congrunt function application in core, add it
 					if (!congruentFound)
 					{
 						core->insert(func);
@@ -587,7 +604,7 @@ namespace EGraphs
 
 		bool IsGround(Function* function)
 		{
-			// this happens when the function is a Term
+			// this happens when the function is a Constant
 			if (function->Inputs->size() == 0)
 			{
 				for (Function* variable : _quantified_variables)
@@ -600,7 +617,7 @@ namespace EGraphs
 				}
 				return true;
 			}
-			// when it is not a Term, check all its inputs
+			// when it is not a Constant, check all its inputs
 			for (Function* input : *function->Inputs)
 			{
 				// if at least one is not ground, return false
@@ -623,10 +640,8 @@ namespace EGraphs
 			{
 				for (Function* function : *pair->second)
 				{
-					if (IsGround(function) && function->Inputs->size() == 0)
-					{
-						groundTerms.push_back(function);
-					}
+					if (!IsGround(function)) continue;
+					groundTerms.push_back(function);
 				}
 			}
 			repr = AssignRepresentatives(repr, groundTerms);
@@ -637,10 +652,7 @@ namespace EGraphs
 			{
 				for (Function* function : *pair->second)
 				{
-					if (function->Inputs->size() == 0)
-					{
-						leftoverTerms.push_back(function);
-					}
+					leftoverTerms.push_back(function);
 				}
 			}
 			repr = AssignRepresentatives(repr, leftoverTerms);
@@ -661,7 +673,7 @@ namespace EGraphs
 				}
 				for (Function* func : *_class[function->GetRoot()])
 				{
-					// set the representative of everything equivalent to self
+					// set the representative of everything equivalent to self, to self
 					(*repr)[func] = function;
 					for (Function* parent : *func->UsedBy)
 					{
@@ -715,6 +727,7 @@ namespace EGraphs
 
 		bool MakesCycleAux(Function* NewGround, std::map<Function*, Function*>* repr, Function* current, std::map<Function*, bool>* ColoredGraph)
 		{
+			// found the starting point
 			if (current->GetRoot() == NewGround->GetRoot())
 			{
 				return true;
@@ -765,6 +778,7 @@ namespace EGraphs
 		}
 
 	public: 
+		// this is QEL
 		static z3::expr Simplify(z3::expr expr, z3::context* ctx)
 		{
 			if (!expr.is_and())
@@ -783,6 +797,11 @@ namespace EGraphs
 			return res;
 		}
 	};
+}
+
+
+#endif // EGraphs_h
+
 }
 
 
