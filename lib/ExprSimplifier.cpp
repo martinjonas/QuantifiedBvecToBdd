@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "ExprSimplifier.h"
+#include "EGraphs.h"
 #include "Model.h"
 #include "UnconstrainedVariableSimplifier.h"
 #include "simplificationPasses/EqualityPropagator.h"
@@ -94,9 +95,15 @@ expr ExprSimplifier::Simplify(expr expression)
 	std::cout << std::endl << std::endl << "nnf:" << std::endl;
 	std::cout << expression << std::endl;
     }
-
+	
+    if (false)
+    {
+	expression = EGraphs::EGraph.Simplify(expression, context);
+    }
+	
     context->check_error();
     clearCaches();
+
     return expression;
 }
 
